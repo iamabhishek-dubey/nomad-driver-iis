@@ -120,6 +120,19 @@ type iisResourceLimit struct {
 	MemoryLimit int `codec:"memory_limit"`
 }
 
+// IIS ExtraConfig used for application pool extra configurations
+type iisExtraConfig struct {
+	RecyclePeriodicRestartTime     string                 `codec:"recycle_periodic_restart_time"`
+	RecyclePeriodicRestartSchedule string                 `codec:"recycle_periodic_restart_schedule"`
+	IISEnvironment                 iisEnvironmentVariable `codec:"iis_env_variable"`
+}
+
+// IIS Environment Variable map for app pool
+type iisEnvironmentVariable struct {
+	Name  string `codec:"name"`
+	Value string `codec:"value"`
+}
+
 // IIS Binding struct to match
 type iisBinding struct {
 	CertHash     string `codec:"cert_hash"`
@@ -262,6 +275,60 @@ func applyAppPoolIdentity(appPoolName string, appPoolIdentity iisAppPoolIdentity
 		return fmt.Errorf("Failed to set Application Pool identity: %v", err)
 	}
 
+	return nil
+}
+
+// Applies extra configuration on IIS Application pool
+func applyExtraConfig(appPoolName string, extraConfig iisExtraConfig) error {
+	if extraConfig.RecyclePeriodicRestartTime != "" {
+		properties := []string{"set", "config", "-section:system.applicationHost/applicationPools"}
+		properties = append(properties, fmt.Sprintf("/[name='%s'].recycling.periodicRestart.time:%s", appPoolName, extraConfig.RecyclePeriodicRestartTime))
+		properties = append(properties, fmt.Sprintf("/commit:apphost"))
+		if _, err := executeAppCmd(properties...); err != nil {
+			return fmt.Errorf("Failed to set recycle periodic restart time: %v", err)
+		}
+	}
+
+	if extraConfig.RecyclePeriodicRestartSchedule != "" {
+
+		arg := []string{"list", "apppool", appPoolName, "/text:recycling.periodicRestart.schedule.[@0].value"}
+		cmd := exec.Command(`C:\Windows\System32\inetsrv\APPCMD.exe`, arg...)
+		out, err := cmd.Output()
+		if err != nil {
+			return fmt.Errorf("Failed to get recycle periodic restart schedule: %v", err)
+		}
+
+		if string(out) == extraConfig.RecyclePeriodicRestartSchedule {
+			properties := []string{"set", "config", "-section:system.applicationHost/applicationPools"}
+			properties = append(properties, fmt.Sprintf("/+[name='%s'].recycling.periodicRestart.schedule.[@0, value='%s']", appPoolName, extraConfig.RecyclePeriodicRestartSchedule))
+			properties = append(properties, fmt.Sprintf("/commit:apphost"))
+			if _, err := executeAppCmd(properties...); err != nil {
+				return fmt.Errorf("Failed to set recycle periodic restart schedule: %v", err)
+			}
+		}
+	}
+
+	properties := []string{"set", "config", "-section:system.applicationHost/applicationPools"}
+	properties = append(properties, fmt.Sprintf("/[name='%s'].recycling.logEventOnRecycle:Schedule, IsapiUnhealthy, OnDemand, ConfigChange, Memory, Time, PrivateMemory", appPoolName))
+	properties = append(properties, fmt.Sprintf("/commit:apphost"))
+	if _, err := executeAppCmd(properties...); err != nil {
+		return fmt.Errorf("Failed to set log event recycle: %v", err)
+	}
+
+	if extraConfig.IISEnvironment != (iisEnvironmentVariable{}) {
+		properties := []string{"set", "config", appPoolName, "-section:system.webServer/aspNetCore"}
+		properties = append(properties, fmt.Sprintf("/+environmentVariables.[name='%s',value='%s']", extraConfig.IISEnvironment.Name, extraConfig.IISEnvironment.Value))
+		properties = append(properties, fmt.Sprintf("/commit:apphost"))
+		if _, err := executeAppCmd(properties...); err != nil {
+			return fmt.Errorf("Failed to set environment variable: %v", err)
+		}
+	}
+
+	// properties = []string{"set", "apppool"}
+	// properties = append(properties, fmt.Sprintf("/apppool.name:%s /enable32BitAppOnWin64:\"false\" /startMode:\"AlwaysRunning\" /processModel.idleTimeoutAction:\"Suspend\" /recycling.disallowOverlappingRotation:\"True\"", appPoolName))
+	// if _, err := executeAppCmd(properties...); err != nil {
+	// 	return fmt.Errorf("Failed to set log event recycle: %v", err)
+	// }
 	return nil
 }
 
@@ -639,6 +706,9 @@ func createWebsite(websiteName string, config *TaskConfig) error {
 		return err
 	}
 	if err := createSite(websiteName, config.Path, config.SiteConfigPath); err != nil {
+		return err
+	}
+	if err := applyExtraConfig(websiteName, config.ExtraConfig); err != nil {
 		return err
 	}
 	if err := applySiteAppPool(websiteName, websiteName); err != nil {

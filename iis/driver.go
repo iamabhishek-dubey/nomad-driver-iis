@@ -91,6 +91,14 @@ var (
 			"cpu_limit":    hclspec.NewAttr("cpu_limit", "number", true),
 			"memory_limit": hclspec.NewAttr("memory_limit", "number", true),
 		})),
+		"extra_config": hclspec.NewBlock("extra_config", false, hclspec.NewObject(map[string]*hclspec.Spec{
+			"recycle_periodic_restart_time":     hclspec.NewAttr("recycle_periodic_restart_time", "string", false),
+			"recycle_periodic_restart_schedule": hclspec.NewAttr("recycle_periodic_restart_schedule", "string", false),
+			"iis_env_variable": hclspec.NewObject(map[string]*hclspec.Spec{
+				"name":  hclspec.NewAttr("name", "string", false),
+				"value": hclspec.NewAttr("value", "string", false),
+			}),
+		})),
 		"bindings": hclspec.NewBlockList("bindings", hclspec.NewObject(map[string]*hclspec.Spec{
 			"hostname":      hclspec.NewAttr("hostname", "string", false),
 			"ipaddress":     hclspec.NewAttr("ipaddress", "string", false),
@@ -128,6 +136,7 @@ type TaskConfig struct {
 	SiteConfigPath    string             `codec:"site_config_path"`
 	AppPoolIdentity   iisAppPoolIdentity `codec:"apppool_identity"`
 	AppPoolResources  iisResourceLimit   `codec:"resource_limit"`
+	ExtraConfig       iisExtraConfig     `codec:"extra_config"`
 	Bindings          []iisBinding       `codec:"bindings"`
 }
 
